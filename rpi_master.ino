@@ -12,6 +12,11 @@
 #define THIRTY_SEC 30*1000/LOOP_DELAY
 #define ONE_MIN 60*1000/LOOP_DELAY
 #define TEN_MIN 600*1000/LOOP_DELAY
+#define PI_BOOT_TIME ONE_MIN
+//#define BEFORE_SHUTDOWN_TIME TEN_MIN
+#define BEFORE_SHUTDOWN_TIME TEN_SEC
+#define PI_SHUTDOWN_TIME THIRTY_SEC
+#define POWER_DECAY_TIME TEN_SEC
 
 int auxPwrOnPipe;
 byte atomState;
@@ -25,7 +30,7 @@ int loopCnt;
 #define WAIT_AUX_PWR_OFF 2
 #define WAIT_BEFORE_SHUTDOWN 3
 #define WAIT_PI_DEAD 4
-#define WAIT_DEAD_DELAY 5
+#define WAIT_POWER_DECAY_DELAY 5
 
 void setup() {
   // configure the pins
@@ -83,7 +88,7 @@ void loop() {
       break;
     // Wait for the RPi to report that it is alive. Give it 30s
     case WAIT_PI_ALIVE:
-      if (piAlive || (loopCnt == THIRTY_SEC))
+      if (piAlive || (loopCnt == PI_BOOT_TIME))
         atomState = WAIT_AUX_PWR_OFF;
       break;
     // Wait for the aux power to be removed
@@ -102,7 +107,7 @@ void loop() {
       if (auxPwrOn)
         atomState = WAIT_PI_ALIVE;
       // else if we have given the RPi to take care of updates etc, then shutdown
-      else if (loopCnt == TEN_MIN) {
+      else if (loopCnt == BEFORE_SHUTDOWN_TIME) {
         digitalWrite(PI_PWR_DOWN_REQ, HIGH);
         atomState = WAIT_PI_DEAD;
         loopCnt = 0;
@@ -114,16 +119,16 @@ void loop() {
     // The RPi will need to ensure that it has completed all housekeeping well before
     // The power is killed, because it is expected to shutdown within 1min.
     case WAIT_PI_DEAD:
-      if (loopCnt == ONE_MIN || !piAlive) {
-        atomState = WAIT_DEAD_DELAY;
+      if (loopCnt == PI_SHUTDOWN_TIME || !piAlive) {
+        atomState = WAIT_POWER_DECAY_DELAY;
         digitalWrite(MAIN_PWR_EN, LOW);
         digitalWrite(PI_PWR_DOWN_REQ, LOW);
         loopCnt = 0;
       }
       break;
     // Allow time for the supply voltage to decay
-    case WAIT_DEAD_DELAY:
-      if (loopCnt == TEN_SEC)
+    case WAIT_POWER_DECAY_DELAY:
+      if (loopCnt == POWER_DECAY_TIME)
         atomState = WAIT_AUX_PWR_ON;
       break;
   }

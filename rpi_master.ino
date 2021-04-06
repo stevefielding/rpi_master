@@ -1,5 +1,8 @@
 // --------------------------- rpi_master ----------------------------
-// define the ATTINY85 pins
+// Version info
+// 2021_04_05: State machine can now change directly to shutdown if piAlive falling edge is detected.
+
+#define the ATTINY85 pins
 #define AUX_PWR_IN 3      // aux power status, 1 = on
 #define AUX_PWR_OUT 1     // aux power status to RPi, 1 = on
 #define MAIN_PWR_EN 4     // main power enable 1 = enable
@@ -12,9 +15,11 @@
 #define THIRTY_SEC 30*1000/LOOP_DELAY
 #define ONE_MIN 60*1000/LOOP_DELAY
 #define TEN_MIN 600*1000/LOOP_DELAY
+#define THIRTY_MIN 1800*1000/LOOP_DELAY
 #define PI_BOOT_TIME ONE_MIN
 //#define BEFORE_SHUTDOWN_TIME TEN_MIN
-#define BEFORE_SHUTDOWN_TIME TEN_SEC
+//#define BEFORE_SHUTDOWN_TIME TEN_SEC
+#define BEFORE_SHUTDOWN_TIME THIRTY_MIN
 #define PI_SHUTDOWN_TIME THIRTY_SEC
 #define POWER_DECAY_TIME TEN_SEC
 
@@ -23,6 +28,7 @@ byte atomState;
 bool auxPwrOn;
 bool piAlive;
 int loopCnt;
+int piAlive_reg1;
 
 // FSM States
 #define WAIT_AUX_PWR_ON 0
@@ -95,6 +101,7 @@ void loop() {
     case WAIT_AUX_PWR_OFF:
       if (!auxPwrOn) {
         atomState = WAIT_BEFORE_SHUTDOWN;
+        piAlive_reg1 = piAlive;
         loopCnt = 0;
       }
       break;
@@ -106,12 +113,20 @@ void loop() {
       // if the aux power returns then abort shutdown
       if (auxPwrOn)
         atomState = WAIT_PI_ALIVE;
-      // else if we have given the RPi to take care of updates etc, then shutdown
-      else if (loopCnt == BEFORE_SHUTDOWN_TIME) {
+      // else if we detect a falling edge for piAlive or we have given the RPi to take care of updates etc, then shutdown
+      // Note that piAlive low, is not capable of triggering this conditional
+      // This is to prevent a power lock out in the situation where the piAlive state is broken
+      // for example, before the sleepy Pi shutdown script has been installed.
+      // But we still want to keep the shutdown time short in the case where the RPi no longer needs
+      // to be powered. Triggering on falling edge allows the Pi to indicate that it is ready
+      // to power down immediately.
+      else if ((piAlive_reg1 && !piAlive) || loopCnt == BEFORE_SHUTDOWN_TIME) {
         digitalWrite(PI_PWR_DOWN_REQ, HIGH);
         atomState = WAIT_PI_DEAD;
         loopCnt = 0;
       }
+      // save the previous value of piAlive
+      piAlive_reg1 = piAlive;
       break;
     // Give the RPi 1min to shutdown and then kill the power even it is not ready
     // Also need to kill the power even if the auxPwrOn comes back up because now we 
